@@ -116,7 +116,6 @@ class PowerSGD_plus_State(object):
     __slots__ = [
         "process_group",
         # The fields below are the hyperparameters that often need to be tuned by the user.
-        "rank_list",
         "start_powerSGD_iter",
         # The fields below are the hyperparameters that seldom need be tuned by the user.
         "min_compression_rate",
@@ -140,7 +139,6 @@ class PowerSGD_plus_State(object):
     def __init__(
         self,
         process_group,
-        rank_list=[1]*20,
         start_powerSGD_iter=1_000,
         min_compression_rate=2,
         use_error_feedback=True,
@@ -150,10 +148,9 @@ class PowerSGD_plus_State(object):
         compression_stats_logging_frequency=10_000,
     ):
         logging.info(
-            "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
+            "start_powerSGD_iter = {}; "
             "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
             "random_seed = {}; compression_stats_logging_frequency = {}".format(
-                rank_list,
                 start_powerSGD_iter,
                 min_compression_rate,
                 orthogonalization_epsilon,
@@ -164,7 +161,7 @@ class PowerSGD_plus_State(object):
             )
         )
         self.process_group = process_group
-        self.rank_list = rank_list
+        #self.rank_list = rank_list
         # Deferring PowerSGD compression util step 'start_powerSGD_iter' can have two advantages:
         # 1) It turns out that PowerSGD may lead to a non-trivial accuracy loss,
         # even if the matrix approximation rank is increased to a large value.
@@ -310,8 +307,7 @@ def powerSGD_plus_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
-        >>> state = PowerSGD_plus_State(process_group=process_group, rank_list,
-                                  start_powerSGD_iter=10, min_compression_rate=0.5)
+        >>> state = PowerSGD_plus_State(process_group=process_group, start_powerSGD_iter=10, min_compression_rate=0.5)
         >>> ddp_model.register_comm_hook(state, powerSGD_plus_hook)
     """  # noqa: B950
     process_group = state.process_group
@@ -363,13 +359,14 @@ def powerSGD_plus_hook(
     total_Qs_size = 0
     length = len(tensors)
     #print ("length of tensors is {0:6d} \n".format(length))
-    rank_list_size = len(state.rank_list)
+    #rank_list_size = len(state.rank_list)
     #for tensor in tensors:
     for i in range(length):
         tensor = tensors[i]
         matrix = tensor.view(tensor.shape[0], -1)
         n, m = matrix.shape
-        matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
+        matrix_approximation_rank = min(n, m, 1)
+        #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         compress_test = _should_compress(
             n, m, matrix_approximation_rank, state.min_compression_rate
@@ -430,8 +427,9 @@ def powerSGD_plus_hook(
     for i in range(length):
         tensor = tensors_to_compress[i]
         n, m = tensor.shape
+        matrix_approximation_rank = min(n, m, 1)
+        #matrix_approximation_rank = min(n, m, rank_list_to_compress[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
-        matrix_approximation_rank = min(n, m, rank_list_to_compress[i%rank_list_size])
         ps.append(
             state.p_memory_dict[bucket_index][
                 p_idx : p_idx + n * matrix_approximation_rank
@@ -623,7 +621,7 @@ def batched_powerSGD_plus_hook(
     # View the input tensor as a 2D square-shape tensor, and pad 0s if necessary.
     square_side_length = math.ceil(math.sqrt(total_length))
     state.total_numel_after_compression += (
-        square_side_length * state.rank_list[0] * 2
+        square_side_length * 2
     )
     padded_total_length = square_side_length ** 2
     input_tensor.resize_(padded_total_length)
@@ -661,7 +659,7 @@ def batched_powerSGD_plus_hook(
         if state.warm_start:
             logging.info(
                 "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
-                    square_side_length, state.rank_list[0]
+                    square_side_length, 1 
                 )
             )
 
@@ -678,14 +676,14 @@ def batched_powerSGD_plus_hook(
                     torch.manual_seed(rng.randint(1_000_000_000))
                     return torch.randn(
                         square_side_length,
-                        state.rank_list[0],
+                        1,
                         device="cpu",
                         dtype=input_tensor.dtype,
                     ).to(device)
             else:
                 return torch.empty(
                     square_side_length,
-                    state.rank_list[0],
+                    1,
                     device=device,
                     dtype=input_tensor.dtype,
                 )
