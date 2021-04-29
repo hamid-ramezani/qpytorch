@@ -7,6 +7,7 @@ from torch.nn.parallel import DistributedDataParallel
 from . import (
     default_hooks as default,
     powerSGD_hook as powerSGD,
+    powerSGD_plus_hook as powerSGD_plus,
     quantization_hooks as quantization,
 )
 
@@ -34,6 +35,26 @@ def _powerSGD_comm_hook_wrapper(
     model.register_comm_hook(powerSGD_state, comm_hook)
 
 
+def _powerSGD_plus_comm_hook_wrapper(
+    comm_hook,
+    model,
+    state,
+    rank_list,
+    start_powerSGD_iter,
+):
+    """
+    To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
+    which will be wrapped up with other state info.
+    """
+    PowerSGD_plus_State = powerSGD_plus.PowerSGD_plus_State(
+        process_group=state,
+        rank_list=rank_list,
+        start_powerSGD_iter=start_powerSGD_iter,
+    )
+    model.register_comm_hook(PowerSGD_plus_State, comm_hook)
+
+
+
 class DDPCommHookType(Enum):
     """
     DDPCommHookType enumerates the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
@@ -56,6 +77,11 @@ class DDPCommHookType(Enum):
         _powerSGD_comm_hook_wrapper,
         comm_hook=powerSGD.powerSGD_hook,
         matrix_approximation_rank=1,
+    )
+    POWER_SGD_PLUS = partial(
+        _powerSGD_plus_comm_hook_wrapper,
+        comm_hook=powerSGD_plus.powerSGD_plus_hook,
+        rank_list=[1]*20,
     )
     # Rank-2 PowerSGD can give a higher accuracy than the default rank-1 version,
     # but it runs slower and consumes more memory.
