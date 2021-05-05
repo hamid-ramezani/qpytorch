@@ -252,6 +252,9 @@ class PowerSGD_plus_State(object):
             self.total_numel_after_compression,
         )
 
+def get_rank(tensor: torch.Tensor) -> int:
+    return 1
+     
 
 def powerSGD_plus_hook(
     state: PowerSGD_plus_State, bucket: dist.GradBucket
@@ -313,6 +316,7 @@ def powerSGD_plus_hook(
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
+    #print ("world-size is {0:3d}\n".format(world_size))
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.get_tensor()
@@ -328,8 +332,10 @@ def powerSGD_plus_hook(
 
     # Incorporate the error from the previous state into the gradients.
     bucket_index = bucket.get_index()
+    #print ("index is {0:3d}\n".format(bucket_index))
     input_tensor_cp = None
     total_length = input_tensor.shape[0]
+    #print ("total length is {0:6d} \n".format(total_length))
     if state.use_error_feedback:
         if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
@@ -358,6 +364,7 @@ def powerSGD_plus_hook(
     total_Ps_size = 0
     total_Qs_size = 0
     length = len(tensors)
+    #length2 = len(state.p_memory_dict)
     #print ("length of tensors is {0:6d} \n".format(length))
     #rank_list_size = len(state.rank_list)
     #for tensor in tensors:
@@ -365,7 +372,7 @@ def powerSGD_plus_hook(
         tensor = tensors[i]
         matrix = tensor.view(tensor.shape[0], -1)
         n, m = matrix.shape
-        matrix_approximation_rank = min(n, m, 1)
+        matrix_approximation_rank = min(n, m, get_rank(tensor))
         #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         compress_test = _should_compress(
@@ -427,7 +434,7 @@ def powerSGD_plus_hook(
     for i in range(length):
         tensor = tensors_to_compress[i]
         n, m = tensor.shape
-        matrix_approximation_rank = min(n, m, 1)
+        matrix_approximation_rank = min(n, m, get_rank(tensor))
         #matrix_approximation_rank = min(n, m, rank_list_to_compress[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         ps.append(
