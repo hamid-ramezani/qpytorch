@@ -272,7 +272,7 @@ class PowerSGD_plus_State(object):
             self.total_numel_after_compression,
         )
 
-def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int , bucket_index: int, call_id: int) -> int:
+def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int , bucket_index: int) -> int:
 
     tensor = tensors[tensor_index]
     matrix = tensor.view(tensor.shape[0], -1)
@@ -436,7 +436,7 @@ def powerSGD_plus_hook(
         #start_index += n*m
         #if bucket_index == 0:
         #  print ("n is {0:6d} and m is {1:6d} \n".format(n,m))
-        matrix_approximation_rank = min(n, m, get_rank(state, tensors, i, start_index, bucket_index, 0))
+        matrix_approximation_rank = min(n, m, get_rank(state, tensors, i, start_index, bucket_index))
         #max_rank = max(8, matrix_approximation_rank)
         #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
@@ -446,7 +446,7 @@ def powerSGD_plus_hook(
         state.total_numel_before_compression += compress_test[1]
         if compress_test[0]:
             tensors_to_compress.append(matrix)
-            rank_list_to_compress.append(get_rank(state, tensors, i, start_index, bucket_index,1))
+            rank_list_to_compress.append(get_rank(state, tensors, i, start_index, bucket_index))
             #rank_list_to_compress.append(matrix_approximation_rank)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
