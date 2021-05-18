@@ -162,7 +162,7 @@ class PowerSGD_plus_State(object):
         start_powerSGD_iter=1_000,
         min_compression_rate=2,
         use_error_feedback=True,
-        warm_start=True,
+        warm_start=False,
         orthogonalization_epsilon=0,
         random_seed=0,
         compression_stats_logging_frequency=10_000,
@@ -283,15 +283,15 @@ def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_ind
     error = LA.norm(layer_error)
     error_value = error.item()
     if 0 <= error_value and error_value < 0.5:
-       return 8
+       return 4
     elif 0.5 <= error_value and error_value < 1.0:
-       return 9
+       return 5
     elif 1.0 <= error_value and error_value < 1.5:
-       return 10
+       return 6
     elif 1.5 <= error_value and error_value < 2.0:
-       return 11
+       return 7
     else:
-       return 12
+       return 8
 
 
     #if bucket_index == 1: 
@@ -436,7 +436,7 @@ def powerSGD_plus_hook(
         #start_index += n*m
         #if bucket_index == 0:
         #  print ("n is {0:6d} and m is {1:6d} \n".format(n,m))
-        matrix_approximation_rank = min(n, m, get_rank(state, tensors, i, start_index, bucket_index,0))
+        matrix_approximation_rank = min(n, m, get_rank(state, tensors, i, start_index, bucket_index, 0))
         #max_rank = max(8, matrix_approximation_rank)
         #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
@@ -489,18 +489,18 @@ def powerSGD_plus_hook(
                     total_Ps_size, total_Qs_size
                 )
             )
-        #state.p_memory_dict[bucket_index] = torch.empty(
-        #    total_Ps_size, device=device, dtype=dtype
-        #)
-        #state.q_memory_dict[bucket_index] = torch.empty(
-        #    total_Qs_size, device=device, dtype=dtype
-        #)
-    state.p_memory_dict[bucket_index] = torch.empty(
-        total_Ps_size, device=device, dtype=dtype
-    )
-    state.q_memory_dict[bucket_index] = torch.empty(
-        total_Qs_size, device=device, dtype=dtype
-    )
+        state.p_memory_dict[bucket_index] = torch.empty(
+            total_Ps_size, device=device, dtype=dtype
+        )
+        state.q_memory_dict[bucket_index] = torch.empty(
+            total_Qs_size, device=device, dtype=dtype
+        )
+    #state.p_memory_dict[bucket_index] = torch.empty(
+    #    total_Ps_size, device=device, dtype=dtype
+    #)
+    #state.q_memory_dict[bucket_index] = torch.empty(
+    #    total_Qs_size, device=device, dtype=dtype
+    #)
 
     # Create Ps and Qs that point to the allocated memory.
     ps = []
@@ -523,7 +523,6 @@ def powerSGD_plus_hook(
         start_index += n*m
         #matrix_approximation_rank = min(n, m, rank_list_to_compress[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
-        #ForkedPdb().set_trace()
         #print ("bucket_index is {0:6d} \n".format(bucket_index))
         #if bucket_index == 0:
         #   print("p_idx is {0:3d} and i is {1:3d} \n".format(p_idx,i))
