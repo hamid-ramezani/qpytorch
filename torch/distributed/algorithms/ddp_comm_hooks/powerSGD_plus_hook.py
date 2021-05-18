@@ -4,8 +4,28 @@ import math
 import numpy as np
 import torch
 import torch.distributed as dist
+from typing import List
 
 from . import default_hooks as default
+
+from torch import linalg as LA
+
+import sys
+import pdb
+
+class ForkedPdb(pdb.Pdb):
+    """A Pdb subclass that may be used
+    from a forked multiprocessing child
+
+    """
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
 
 
 def _orthogonalize(matrix, epsilon=0):
@@ -252,9 +272,41 @@ class PowerSGD_plus_State(object):
             self.total_numel_after_compression,
         )
 
-def get_rank(tensor: torch.Tensor) -> int:
-    return 1
-     
+def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int , bucket_index: int, call_id: int) -> int:
+
+    tensor = tensors[tensor_index]
+    matrix = tensor.view(tensor.shape[0], -1)
+    n, m = matrix.shape
+    size = n*m
+    bucket_error = state.error_dict[bucket_index]
+    layer_error = bucket_error[start_index:size]
+    error = LA.norm(layer_error)
+    error_value = error.item()
+    if 0 <= error_value and error_value < 0.5:
+       return 8
+    elif 0.5 <= error_value and error_value < 1.0:
+       return 9
+    elif 1.0 <= error_value and error_value < 1.5:
+       return 10
+    elif 1.5 <= error_value and error_value < 2.0:
+       return 11
+    else:
+       return 12
+
+
+    #if bucket_index == 1: 
+    #   print('error value is {0:6.3f}\n'.format(error_value))
+    #if bucket_index == 1:
+    #   print ("error is {0:8.4f}\n".format(number))
+    #if bucket_index == 1:
+    #   print ("start_index is {0:6d}\n".format(start_index))
+    #layer_error_matrix = layer_error.view(layer_error.shape[0], -1)
+    #a, b = layer_error_matrix.shape
+    #if bucket_index == 1:
+    #   print ("A and B are {0:6d} and {1:6d}\n".format(a,b))
+    #bucket_error = bucket_error[size:]
+    #return 1
+
 
 def powerSGD_plus_hook(
     state: PowerSGD_plus_State, bucket: dist.GradBucket
@@ -353,9 +405,16 @@ def powerSGD_plus_hook(
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
         input_tensor_cp = torch.clone(input_tensor).detach()
+        #input_tensor_secondCP = torch.clone(input_tensor).detach()
+        #bucket_error = state.error_dict[bucket_index]
+        #bucket_error_cp = torch.clone(bucket_error).detach()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
     tensors = bucket.get_per_parameter_tensors()
+    input_tensor_matrix = input_tensor.view(input_tensor.shape[0], -1)
+    a, b = input_tensor_matrix.shape
+    #if bucket_index == 0:
+    #   print ("A and B are {0:6d} and {1:6d}\n".format(a,b))
 
     # Step I: Divide all the tensors into two groups,
     # one will be compressed before allreduce and the other will be directly allreduced without compression.
@@ -368,11 +427,17 @@ def powerSGD_plus_hook(
     #print ("length of tensors is {0:6d} \n".format(length))
     #rank_list_size = len(state.rank_list)
     #for tensor in tensors:
+    start_index = 0
     for i in range(length):
         tensor = tensors[i]
+        #start_index += tensor.shape[0]
         matrix = tensor.view(tensor.shape[0], -1)
         n, m = matrix.shape
-        matrix_approximation_rank = min(n, m, get_rank(tensor))
+        #start_index += n*m
+        #if bucket_index == 0:
+        #  print ("n is {0:6d} and m is {1:6d} \n".format(n,m))
+        matrix_approximation_rank = min(n, m, get_rank(state, tensors, i, start_index, bucket_index,0))
+        #max_rank = max(8, matrix_approximation_rank)
         #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         compress_test = _should_compress(
@@ -381,15 +446,25 @@ def powerSGD_plus_hook(
         state.total_numel_before_compression += compress_test[1]
         if compress_test[0]:
             tensors_to_compress.append(matrix)
-            rank_list_to_compress.append(matrix_approximation_rank)
+            rank_list_to_compress.append(get_rank(state, tensors, i, start_index, bucket_index,1))
+            #rank_list_to_compress.append(matrix_approximation_rank)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
+            ##total_Ps_size += n * max_rank
+            ##total_Qs_size += m * max_rank
             state.total_numel_after_compression += compress_test[2]
         else:
             uncompressed_tensors.append(tensor)
             state.total_numel_after_compression += compress_test[1]
+        start_index += n*m
 
     _report_compression_stats(bucket, state)
+    #if bucket_index == 0:
+    #   for rank in rank_list_to_compress:
+    #      print("rank is {0:3d}\n".format(rank))
+    #   print("\n\n\n\n\n")
+
+    #print ("a is {0:6d} \n".format(a))
 
     # Step II: Handle uncompressed tensors.
     # Allocate contiguous memory for these tensors to allreduce efficiently.
@@ -414,12 +489,18 @@ def powerSGD_plus_hook(
                     total_Ps_size, total_Qs_size
                 )
             )
-        state.p_memory_dict[bucket_index] = torch.empty(
-            total_Ps_size, device=device, dtype=dtype
-        )
-        state.q_memory_dict[bucket_index] = torch.empty(
-            total_Qs_size, device=device, dtype=dtype
-        )
+        #state.p_memory_dict[bucket_index] = torch.empty(
+        #    total_Ps_size, device=device, dtype=dtype
+        #)
+        #state.q_memory_dict[bucket_index] = torch.empty(
+        #    total_Qs_size, device=device, dtype=dtype
+        #)
+    state.p_memory_dict[bucket_index] = torch.empty(
+        total_Ps_size, device=device, dtype=dtype
+    )
+    state.q_memory_dict[bucket_index] = torch.empty(
+        total_Qs_size, device=device, dtype=dtype
+    )
 
     # Create Ps and Qs that point to the allocated memory.
     ps = []
@@ -429,14 +510,26 @@ def powerSGD_plus_hook(
 
     length = len(tensors_to_compress)
     #print ("length of tensors_to_compress is {0:6d} \n".format(length))
-  
+
+    start_index = 0 
     #for tensor in tensors_to_compress:
     for i in range(length):
         tensor = tensors_to_compress[i]
         n, m = tensor.shape
-        matrix_approximation_rank = min(n, m, get_rank(tensor))
+        #matrix_approximation_rank = min(n, m, 1)
+        matrix_approximation_rank = min(n, m, rank_list_to_compress[i])
+
+        #matrix_approximation_rank = min(n, m, get_rank(state, tensors_to_compress, i, start_index, bucket_index))
+        start_index += n*m
         #matrix_approximation_rank = min(n, m, rank_list_to_compress[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
+        #ForkedPdb().set_trace()
+        #print ("bucket_index is {0:6d} \n".format(bucket_index))
+        #if bucket_index == 0:
+        #   print("p_idx is {0:3d} and i is {1:3d} \n".format(p_idx,i))
+
+        #if bucket_index == 0:
+        #   print("rank is {0:3d}\n".format(rank_list_to_compress[i]))
         ps.append(
             state.p_memory_dict[bucket_index][
                 p_idx : p_idx + n * matrix_approximation_rank
