@@ -283,15 +283,15 @@ def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_ind
     error = LA.norm(layer_error)
     error_value = error.item()
     if 0 <= error_value and error_value < 0.5:
-       return 4
+       return 1
     elif 0.5 <= error_value and error_value < 1.0:
-       return 5
+       return 2
     elif 1.0 <= error_value and error_value < 1.5:
-       return 6
-    elif 1.5 <= error_value and error_value < 2.0:
-       return 7
+       return 3
+    #elif 1.5 <= error_value and error_value < 2.0:
+    #   return 4
     else:
-       return 8
+       return 4
 
 
     #if bucket_index == 1: 
@@ -436,7 +436,12 @@ def powerSGD_plus_hook(
         #start_index += n*m
         #if bucket_index == 0:
         #  print ("n is {0:6d} and m is {1:6d} \n".format(n,m))
-        matrix_approximation_rank = min(n, m, get_rank(state, tensors, i, start_index, bucket_index))
+        rank = get_rank(state, tensors, i, start_index, bucket_index)
+        obj_list=[]
+        obj_list.append(rank)
+        dist.broadcast_object_list(obj_list, 0)
+        matrix_approximation_rank = min(n, m, obj_list[0])
+        #matrix_approximation_rank = min(n, m, rank)
         #max_rank = max(8, matrix_approximation_rank)
         #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
         #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
@@ -446,7 +451,8 @@ def powerSGD_plus_hook(
         state.total_numel_before_compression += compress_test[1]
         if compress_test[0]:
             tensors_to_compress.append(matrix)
-            rank_list_to_compress.append(get_rank(state, tensors, i, start_index, bucket_index))
+            rank_list_to_compress.append(obj_list[0])
+            #rank_list_to_compress.append(rank)
             #rank_list_to_compress.append(matrix_approximation_rank)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
@@ -460,6 +466,7 @@ def powerSGD_plus_hook(
 
     _report_compression_stats(bucket, state)
     #if bucket_index == 0:
+    #    print("this id is {0:3d} \n".format(dist.get_rank()))
     #   for rank in rank_list_to_compress:
     #      print("rank is {0:3d}\n".format(rank))
     #   print("\n\n\n\n\n")
