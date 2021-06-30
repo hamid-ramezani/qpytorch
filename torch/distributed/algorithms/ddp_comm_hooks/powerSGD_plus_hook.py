@@ -272,27 +272,47 @@ class PowerSGD_plus_State(object):
             self.total_numel_after_compression,
         )
 
-def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int , bucket_index: int) -> int:
+def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int, bucket_index: int, max_error: float) -> int:
 
     tensor = tensors[tensor_index]
     matrix = tensor.view(tensor.shape[0], -1)
     n, m = matrix.shape
     size = n*m
     bucket_error = state.error_dict[bucket_index]
-    layer_error = bucket_error[start_index:size]
+    layer_error = bucket_error[start_index: start_index+size]
+    #if bucket_index == 1 and bucket_error.device.index == 0:
+    #  #print(type(layer_error))
+    #  print(layer_error.shape)
+    #if bucket_index == 1 and bucket_error.device.index == 0:
+    #  layer_error_matrix = layer_error.view(layer_error.shape[0], -1)
+    #  a, b = layer_error_matrix.shape
+    #  print('A is {0:3d} and B is {1:3d}\n'.format(a,b))
+
     error = LA.norm(layer_error)
     error_value = error.item()
-    if 0 <= error_value and error_value < 0.5:
-       return 1
-    elif 0.5 <= error_value and error_value < 1.0:
-       return 2
-    elif 1.0 <= error_value and error_value < 1.5:
-       return 3
-    #elif 1.5 <= error_value and error_value < 2.0:
-    #   return 4
-    else:
+    error_normalized = 0.0
+    if (max_error != 0.0):
+      error_normalized = error_value/max_error
+    if 0 <= error_normalized and error_normalized < 0.06:
+       #if bucket_error.device.index == 0:
+       #   print(4)
+       #   print()
        return 4
-
+    elif 0.06 <= error_normalized and error_normalized < 0.1:
+       #if bucket_index == 1 and bucket_error.device.index == 0:
+       #   print(5)
+       #   print()
+       return 5
+    elif 0.1 <= error_normalized and error_normalized < 0.3:
+       #if bucket_index == 1 and bucket_error.device.index == 0:
+       #   print(6)
+       #   print()
+       return 6
+    else:
+       #if bucket_index == 1 and bucket_error.device.index == 0:
+       #   print(7)
+       #   print()
+       return 7
 
     #if bucket_index == 1: 
     #   print('error value is {0:6.3f}\n'.format(error_value))
@@ -427,6 +447,22 @@ def powerSGD_plus_hook(
     #print ("length of tensors is {0:6d} \n".format(length))
     #rank_list_size = len(state.rank_list)
     #for tensor in tensors:
+
+    start_index = 0
+    max_error = 0.0
+    for i in range(length):
+        tensor = tensors[i]
+        matrix = tensor.view(tensor.shape[0], -1)
+        n, m = matrix.shape
+        size = n*m
+        bucket_error = state.error_dict[bucket_index]
+        layer_error = bucket_error[start_index: start_index+size]
+        error = LA.norm(layer_error)
+        error_value = error.item()
+        if (error_value > max_error):
+           max_error = error_value
+        start_index += n*m
+
     start_index = 0
     for i in range(length):
         tensor = tensors[i]
@@ -436,7 +472,7 @@ def powerSGD_plus_hook(
         #start_index += n*m
         #if bucket_index == 0:
         #  print ("n is {0:6d} and m is {1:6d} \n".format(n,m))
-        rank = get_rank(state, tensors, i, start_index, bucket_index)
+        rank = get_rank(state, tensors, i, start_index, bucket_index, max_error)
         obj_list=[]
         obj_list.append(rank)
         dist.broadcast_object_list(obj_list, 0)
