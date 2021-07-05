@@ -41,6 +41,9 @@ def _powerSGD_plus_comm_hook_wrapper(
     state,
     rank_list,
     start_powerSGD_iter,
+    update_iter,
+    ranks_list,
+    bounds, 
 ):
     """
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
@@ -50,6 +53,9 @@ def _powerSGD_plus_comm_hook_wrapper(
         process_group=state,
         rank_list=rank_list,
         start_powerSGD_iter=start_powerSGD_iter,
+        update_iter=update_iter,
+        ranks_list=ranks_list,
+        bounds = bounds
     )
     model.register_comm_hook(PowerSGD_plus_State, comm_hook)
 

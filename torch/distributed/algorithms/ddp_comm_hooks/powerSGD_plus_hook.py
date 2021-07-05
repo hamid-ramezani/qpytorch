@@ -154,6 +154,10 @@ class PowerSGD_plus_State(object):
         "total_numel_after_compression",
         "compression_stats_logging_frequency",
         "next_stats_report",
+        "ranks",
+        "update_iter",
+        "ranks_list",
+        "bounds", 
     ]
 
     def __init__(
@@ -166,6 +170,10 @@ class PowerSGD_plus_State(object):
         orthogonalization_epsilon=0,
         random_seed=0,
         compression_stats_logging_frequency=10_000,
+        ranks=[],
+        update_iter=1000, 
+        ranks_list=[],
+        bounds=[],
     ):
         logging.info(
             "start_powerSGD_iter = {}; "
@@ -239,6 +247,10 @@ class PowerSGD_plus_State(object):
             1, compression_stats_logging_frequency
         )
         self.next_stats_report = 0
+        self.ranks = []
+        self.update_iter = update_iter
+        self.ranks_list = ranks_list
+        self.bounds = bounds
 
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
@@ -272,60 +284,59 @@ class PowerSGD_plus_State(object):
             self.total_numel_after_compression,
         )
 
-def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int, bucket_index: int, max_error: float) -> int:
+#def get_rank(state: PowerSGD_plus_State, tensors: List[torch.Tensor], tensor_index: int, start_index: int, bucket_index: int, max_error: float) -> int:
+#
+#    tensor = tensors[tensor_index]
+#    matrix = tensor.view(tensor.shape[0], -1)
+#    n, m = matrix.shape
+#    size = n*m
+#    bucket_error = state.error_dict[bucket_index]
+#    layer_error = bucket_error[start_index: start_index+size]
+#    error = LA.norm(layer_error)
+#    error_value = error.item()
+#    error_normalized = 0.0
+#    if (max_error != 0.0):
+#      error_normalized = error_value/max_error
+#    if 0 <= error_normalized and error_normalized < 0.06:
+#       #if bucket_error.device.index == 0:
+#       #   print(4)
+#       #   print()
+#       return 4
+#    elif 0.06 <= error_normalized and error_normalized < 0.1:
+#       #if bucket_index == 1 and bucket_error.device.index == 0:
+#       #   print(5)
+#       #   print()
+#       return 5
+#    elif 0.1 <= error_normalized and error_normalized < 0.3:
+#       #if bucket_index == 1 and bucket_error.device.index == 0:
+#       #   print(6)
+#       #   print()
+#       return 6
+#    else:
+#       #if bucket_index == 1 and bucket_error.device.index == 0:
+#       #   print(7)
+#       #   print()
+#       return 7
 
-    tensor = tensors[tensor_index]
-    matrix = tensor.view(tensor.shape[0], -1)
-    n, m = matrix.shape
-    size = n*m
-    bucket_error = state.error_dict[bucket_index]
-    layer_error = bucket_error[start_index: start_index+size]
-    #if bucket_index == 1 and bucket_error.device.index == 0:
-    #  #print(type(layer_error))
-    #  print(layer_error.shape)
-    #if bucket_index == 1 and bucket_error.device.index == 0:
-    #  layer_error_matrix = layer_error.view(layer_error.shape[0], -1)
-    #  a, b = layer_error_matrix.shape
-    #  print('A is {0:3d} and B is {1:3d}\n'.format(a,b))
+def get_rank(error_value: float, max_error: float, state: PowerSGD_plus_State) -> int:
 
-    error = LA.norm(layer_error)
-    error_value = error.item()
     error_normalized = 0.0
     if (max_error != 0.0):
       error_normalized = error_value/max_error
-    if 0 <= error_normalized and error_normalized < 0.06:
-       #if bucket_error.device.index == 0:
-       #   print(4)
-       #   print()
-       return 4
-    elif 0.06 <= error_normalized and error_normalized < 0.1:
-       #if bucket_index == 1 and bucket_error.device.index == 0:
-       #   print(5)
-       #   print()
-       return 5
-    elif 0.1 <= error_normalized and error_normalized < 0.3:
-       #if bucket_index == 1 and bucket_error.device.index == 0:
-       #   print(6)
-       #   print()
-       return 6
+    if state.bounds[0] <= error_normalized and error_normalized < state.bounds[1]:
+       return state.ranks_list[0]
     else:
-       #if bucket_index == 1 and bucket_error.device.index == 0:
-       #   print(7)
-       #   print()
-       return 7
-
-    #if bucket_index == 1: 
-    #   print('error value is {0:6.3f}\n'.format(error_value))
-    #if bucket_index == 1:
-    #   print ("error is {0:8.4f}\n".format(number))
-    #if bucket_index == 1:
-    #   print ("start_index is {0:6d}\n".format(start_index))
-    #layer_error_matrix = layer_error.view(layer_error.shape[0], -1)
-    #a, b = layer_error_matrix.shape
-    #if bucket_index == 1:
-    #   print ("A and B are {0:6d} and {1:6d}\n".format(a,b))
-    #bucket_error = bucket_error[size:]
-    #return 1
+       return state.ranks_list[1]
+    #elif state.bounds[1] <= error_normalized and error_normalized < state.bounds[2]:
+    #   return state.ranks_list[1]
+    #else:
+    #   return state.ranks_list[2]
+    #elif 0.2 <= error_normalized and error_normalized < 0.4:
+    #   return 2
+    #elif 0.4 <= error_normalized and error_normalized < 0.6:
+    #   return 3
+    #else:
+    #   return 4
 
 
 def powerSGD_plus_hook(
@@ -448,48 +459,57 @@ def powerSGD_plus_hook(
     #rank_list_size = len(state.rank_list)
     #for tensor in tensors:
 
-    start_index = 0
-    max_error = 0.0
-    for i in range(length):
-        tensor = tensors[i]
-        matrix = tensor.view(tensor.shape[0], -1)
-        n, m = matrix.shape
-        size = n*m
-        bucket_error = state.error_dict[bucket_index]
-        layer_error = bucket_error[start_index: start_index+size]
-        error = LA.norm(layer_error)
-        error_value = error.item()
-        if (error_value > max_error):
-           max_error = error_value
-        start_index += n*m
+    #update ranks after each update_iter steps
+    if state.iter == state.start_powerSGD_iter or state.iter % state.update_iter == 0:
+       #if tensors[0].device.index == 0: 
+       #    print('we are in condition')
+       #    print()
+       start_index = 0
+       max_error = 0.0
+       error_list = []
+       state.ranks = []
+       for i in range(length):
+           tensor = tensors[i]
+           matrix = tensor.view(tensor.shape[0], -1)
+           n, m = matrix.shape
+           size = n*m
+           bucket_error = state.error_dict[bucket_index]
+           layer_error = bucket_error[start_index: start_index+size]
+           error = LA.norm(layer_error)
+           error_value = error.item()
+           error_list.append(error_value)
+           if (error_value > max_error):
+              max_error = error_value
+           start_index += n*m
 
-    start_index = 0
+       for i in range(length):
+           rank = get_rank(error_list[i], max_error, state)
+           obj_list=[]
+           obj_list.append(rank)
+           dist.broadcast_object_list(obj_list, 0)
+           state.ranks.append(obj_list[0])
+
+    #start_index = 0
     for i in range(length):
         tensor = tensors[i]
-        #start_index += tensor.shape[0]
         matrix = tensor.view(tensor.shape[0], -1)
         n, m = matrix.shape
-        #start_index += n*m
-        #if bucket_index == 0:
-        #  print ("n is {0:6d} and m is {1:6d} \n".format(n,m))
-        rank = get_rank(state, tensors, i, start_index, bucket_index, max_error)
-        obj_list=[]
-        obj_list.append(rank)
-        dist.broadcast_object_list(obj_list, 0)
-        matrix_approximation_rank = min(n, m, obj_list[0])
-        #matrix_approximation_rank = min(n, m, rank)
-        #max_rank = max(8, matrix_approximation_rank)
-        #matrix_approximation_rank = min(n, m, state.rank_list[i%rank_list_size])
-        #matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
+        ##rank = get_rank(state, tensors, i, start_index, bucket_index, max_error)
+        #rank = get_rank(error_list[i], max_error)
+        #obj_list=[]
+        #obj_list.append(rank)
+        #dist.broadcast_object_list(obj_list, 0)
+        #matrix_approximation_rank = min(n, m, obj_list[0])
+        matrix_approximation_rank = min(n, m, state.ranks[i])
         compress_test = _should_compress(
             n, m, matrix_approximation_rank, state.min_compression_rate
         )
         state.total_numel_before_compression += compress_test[1]
         if compress_test[0]:
             tensors_to_compress.append(matrix)
-            rank_list_to_compress.append(obj_list[0])
+            #rank_list_to_compress.append(obj_list[0])
             #rank_list_to_compress.append(rank)
-            #rank_list_to_compress.append(matrix_approximation_rank)
+            rank_list_to_compress.append(matrix_approximation_rank)
             total_Ps_size += n * matrix_approximation_rank
             total_Qs_size += m * matrix_approximation_rank
             ##total_Ps_size += n * max_rank
@@ -498,7 +518,7 @@ def powerSGD_plus_hook(
         else:
             uncompressed_tensors.append(tensor)
             state.total_numel_after_compression += compress_test[1]
-        start_index += n*m
+        #start_index += n*m
 
     _report_compression_stats(bucket, state)
     #if bucket_index == 0:
@@ -522,7 +542,8 @@ def powerSGD_plus_hook(
     # If warm-start is enabled, reuse Ps and Qs from the previous iteration if possible.
     # The memory spaces of Ps and Qs need to be allocated in the first iteration when PowerSGD is applied.
     need_randomize_qs = False
-    if not state.warm_start or bucket_index not in state.p_memory_dict:
+    if not state.warm_start or state.iter % state.update_iter == 0 or state.iter == state.start_powerSGD_iter or bucket_index not in state.p_memory_dict:
+    #if not state.warm_start or bucket_index not in state.p_memory_dict:
         need_randomize_qs = True
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
@@ -554,7 +575,7 @@ def powerSGD_plus_hook(
     length = len(tensors_to_compress)
     #print ("length of tensors_to_compress is {0:6d} \n".format(length))
 
-    start_index = 0 
+    start_index = 0
     #for tensor in tensors_to_compress:
     for i in range(length):
         tensor = tensors_to_compress[i]
